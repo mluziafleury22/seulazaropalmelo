@@ -1,0 +1,269 @@
+  <!-- Lógica do Sistema com Firebase -->
+    <script>
+        // ==========================================
+        // ⚙️ CONFIGURAÇÃO DO FIREBASE
+        // ==========================================
+        const firebaseConfig = {
+            
+            apiKey: "AIzaSyBgujTBGY1Y7ysDQbBYHdvd6rUDibTXc-c",
+  authDomain: "seulazaropalmelo.firebaseapp.com",
+  projectId: "seulazaropalmelo",
+  storageBucket: "seulazaropalmelo.firebasestorage.app",
+  messagingSenderId: "764498809795",
+  appId: "1:764498809795:web:1836e5c4096aaffa77a376"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+        const SENHA_ADMIN = "Mclara12"; 
+
+        window.solicitacoesCache = [];
+
+        function alternarVisao(idAtivo) {
+            ['view-home', 'view-form', 'view-sucesso', 'view-admin-login', 'view-admin-dashboard'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(idAtivo).classList.remove('hidden');
+            window.scrollTo(0, 0);
+        }
+
+        function mudarParaFormulario() { alternarVisao('view-form'); }
+        function voltarHome() { alternarVisao('view-home'); }
+        function abrirAdminLogin() { alternarVisao('view-admin-login'); }
+
+        async function enviarFormulario(event) {
+            event.preventDefault();
+            const btn = document.getElementById('btnEnviar');
+            btn.disabled = true;
+            btn.innerText = "Enviando...";
+
+            const novoPedido = {
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                data: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'}),
+                req_nome: document.getElementById('req_nome').value,
+                req_tel: document.getElementById('req_tel').value,
+                req_end: document.getElementById('req_end').value,
+                req_cidade: document.getElementById('req_cidade').value,
+                pac_nome: document.getElementById('pac_nome').value,
+                pac_nasc: document.getElementById('pac_nasc').value,
+                pac_relacao: document.getElementById('pac_relacao').value,
+                pac_end: document.getElementById('pac_end').value,
+                tipo: document.querySelector('input[name="tipo_atendimento"]:checked').value,
+                motivo: document.getElementById('pedido_motivo').value,
+                status: 'Pendente'
+            };
+
+            try {
+                await db.collection('solicitacoes').add(novoPedido);
+                document.getElementById('formAtendimento').reset();
+                alternarVisao('view-sucesso');
+            } catch (error) {
+                alert("Erro ao enviar. Verifique se configurou corretamente as chaves do Firebase.");
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Enviar Solicitação";
+            }
+        }
+
+        function fazerLogin(event) {
+            event.preventDefault();
+            const senhaDigitada = document.getElementById('admin_senha').value;
+            if (senhaDigitada === SENHA_ADMIN) {
+                document.getElementById('admin_senha').value = '';
+                carregarDashboard();
+                alternarVisao('view-admin-dashboard');
+            } else {
+                alert('Senha incorreta!');
+            }
+        }
+
+        async function carregarDashboard() {
+            const tbody = document.getElementById('admin-tbody');
+            const listaVazia = document.getElementById('lista-vazia');
+            const tabela = document.getElementById('tabela-solicitacoes');
+
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-400">Carregando dados da nuvem...</td></tr>`;
+            
+            try {
+                const snapshot = await db.collection('solicitacoes').orderBy('timestamp', 'desc').get();
+                tbody.innerHTML = '';
+                window.solicitacoesCache = [];
+
+                if (snapshot.empty) {
+                    listaVazia.classList.remove('hidden');
+                    tabela.classList.add('hidden');
+                    return;
+                }
+
+                listaVazia.classList.add('hidden');
+                tabela.classList.remove('hidden');
+
+                snapshot.forEach(docSnap => {
+                    const item = docSnap.data();
+                    item.id = docSnap.id;
+                    window.solicitacoesCache.push(item);
+
+                    let badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+                    if (item.status === 'Em atendimento') badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+                    if (item.status === 'Concluído') badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-slate-50 transition';
+                    tr.innerHTML = `
+                        <td class="p-3 text-xs text-slate-500 whitespace-nowrap">${item.data || 'Recente'}</td>
+                        <td class="p-3">
+                            <div class="font-medium text-slate-900">${item.req_nome}</div>
+                            <div class="text-xs text-slate-500">📞 ${item.req_tel} | ${item.req_cidade}</div>
+                        </td>
+                        <td class="p-3">
+                            <div class="font-medium text-slate-900">${item.pac_nome}</div>
+                            <div class="text-xs text-slate-500">(${item.pac_relacao})</div>
+                        </td>
+                        <td class="p-3 font-medium text-emerald-800 text-xs">${item.tipo}</td>
+                        <td class="p-3 whitespace-nowrap">
+                            <select onchange="atualizarStatus('${item.id}', this.value)" class="text-xs font-medium px-2.5 py-1.5 rounded-full border ${badgeColor} outline-none cursor-pointer">
+                                <option value="Pendente" ${item.status === 'Pendente' ? 'selected' : ''}>🟡 Pendente</option>
+                                <option value="Em atendimento" ${item.status === 'Em atendimento' ? 'selected' : ''}>🔵 Em atendimento</option>
+                                <option value="Concluído" ${item.status === 'Concluído' ? 'selected' : ''}>🟢 Concluído</option>
+                            </select>
+                        </td>
+                        <td class="p-3 whitespace-nowrap flex items-center gap-1.5">
+                            <button onclick="verDetalhes('${item.id}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-2.5 py-1.5 rounded-lg transition" title="Ler pedido completo">🔍 Ver</button>
+                            <button onclick="deletarPedido('${item.id}')" class="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition text-xs" title="Excluir">🗑️</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error(error);
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-red-500">Erro ao carregar dados da nuvem.</td></tr>`;
+            }
+        }
+
+        function verDetalhes(id) {
+            const item = window.solicitacoesCache.find(s => s.id === id);
+            if (!item) return;
+
+            const html = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border">
+                    <div>
+                        <p class="text-xs text-slate-500 font-semibold uppercase">Data do Pedido</p>
+                        <p class="font-medium text-slate-900">${item.data}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-500 font-semibold uppercase">Status Atual</p>
+                        <p class="font-medium text-emerald-800">${item.status}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 class="font-bold text-emerald-800 border-b pb-1 mb-2">1. Dados de quem está solicitando</h4>
+                    <p><strong>Nome:</strong> ${item.req_nome}</p>
+                    <p><strong>Telefone/WhatsApp:</strong> ${item.req_tel}</p>
+                    <p><strong>Endereço:</strong> ${item.req_end}</p>
+                    <p><strong>Cidade/Estado:</strong> ${item.req_cidade}</p>
+                </div>
+
+                <div>
+                    <h4 class="font-bold text-emerald-800 border-b pb-1 mb-2">2. Dados de quem receberá o atendimento</h4>
+                    <p><strong>Nome da Pessoa Atendida:</strong> ${item.pac_nome}</p>
+                    <p><strong>Data de Nascimento:</strong> ${item.pac_nasc}</p>
+                    <p><strong>Relação com Solicitante:</strong> ${item.pac_relacao}</p>
+                    <p><strong>Endereço/Cidade:</strong> ${item.pac_end}</p>
+                </div>
+
+                <div>
+                    <h4 class="font-bold text-emerald-800 border-b pb-1 mb-2">3. Tipo de Atendimento</h4>
+                    <p class="text-emerald-700 font-semibold">${item.tipo}</p>
+                </div>
+
+                <div>
+                    <h4 class="font-bold text-emerald-800 border-b pb-1 mb-2">4. Motivo / Pedido Detalhado</h4>
+                    <div class="bg-white border p-3 rounded-lg text-slate-800 whitespace-pre-wrap leading-relaxed">${item.motivo}</div>
+                </div>
+            `;
+
+            document.getElementById('modal-conteudo').innerHTML = html;
+            document.getElementById('modal-detalhes').classList.remove('hidden');
+        }
+
+        function fecharModal() {
+            document.getElementById('modal-detalhes').classList.add('hidden');
+        }
+
+        function baixarPlanilha() {
+            if (window.solicitacoesCache.length === 0) {
+                alert("Não há dados para exportar.");
+                return;
+            }
+
+            // Cabeçalho da planilha CSV (com codificação UTF-8 BOM para acentos ficarem corretos no Excel)
+            let csvContent = "\uFEFFData,Solicitante Nome,Solicitante Tel,Solicitante Endereço,Solicitante Cidade,Pessoa Atendida,Data Nasc,Relação,Endereço Pessoa,Tipo de Atendimento,Motivo/Pedido,Status\n";
+
+            window.solicitacoesCache.forEach(item => {
+                const row = [
+                    `"${item.data || ''}"`,
+                    `"${item.req_nome || ''}"`,
+                    `"${item.req_tel || ''}"`,
+                    `"${item.req_end || ''}"`,
+                    `"${item.req_cidade || ''}"`,
+                    `"${item.pac_nome || ''}"`,
+                    `"${item.pac_nasc || ''}"`,
+                    `"${item.pac_relacao || ''}"`,
+                    `"${item.pac_end || ''}"`,
+                    `"${item.tipo || ''}"`,
+                    `"${(item.motivo || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`,
+                    `"${item.status || ''}"`
+                ];
+                csvContent += row.join(",") + "\n";
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `solicitacoes_lazaro_ferreira_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+        }
+
+        async function atualizarStatus(id, novoStatus) {
+            try {
+                await db.collection('solicitacoes').doc(id).update({ status: novoStatus });
+            } catch (error) {
+                alert("Erro ao atualizar status.");
+                console.error(error);
+            }
+        }
+
+        async function deletarPedido(id) {
+            if (confirm('Deseja excluir esta solicitação?')) {
+                try {
+                    await db.collection('solicitacoes').doc(id).delete();
+                    carregarDashboard();
+                } catch (error) {
+                    alert("Erro ao excluir.");
+                    console.error(error);
+                }
+            }
+        }
+
+        async function limparTudo() {
+            if (confirm('Tem certeza que deseja apagar TODAS as solicitações da nuvem?')) {
+                try {
+                    const snapshot = await db.collection('solicitacoes').get();
+                    const batch = db.batch();
+                    snapshot.forEach(doc => { batch.delete(doc.ref); });
+                    await batch.commit();
+                    carregarDashboard();
+                } catch (error) {
+                    alert("Erro ao apagar todos os registros.");
+                    console.error(error);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
